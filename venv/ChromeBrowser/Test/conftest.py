@@ -1,99 +1,105 @@
-from selenium import webdriver
+"""
+This module contains shared fixtures for web UI tests.
+For now, only Chrome browser is supported.
+"""
+
+import json
+from lib2to3.pgen2 import driver
+
 import pytest
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
+import allure
+import os
+
+from allure_commons.types import AttachmentType
+from selenium.webdriver import Chrome
+from selenium.webdriver.chrome import options
+from selenium.webdriver.chrome.options import Options
 
 
-# Contents of the conftest.py file
-def pytest_addoption(parser):
-    parser.addoption("-B", "--browser",
-                     dest="browser",
-                     default="firefox",
-                     help="Browser. Valid options are firefox, ie and chrome")
 
+# CONFIG_PATH = 'resources\config.json'
+# CONFIG_PATH = os.getcwd() + r'\\resources\\config.json'
+CONFIG_PATH = os.getcwd() + "/resources/config.json"
+Browser_path = "/usr/local/bin/chromedriver"
+DEFAULT_WAIT_TIME = 10
+SUPPORTED_BROWSERS = ['chrome']
 
-@pytest.fixture
-def browser(request):
-    "pytest fixture for browser"
-    return request.config.getoption("-B")  # Note how this ties to the newly added command line parameter
+@allure.step('Reading config from json file')
+@pytest.fixture(scope='session')
+def config():
+    # Read the JSON config file and returns it as a parsed dict
+    with open(CONFIG_PATH) as config_file:
+        data = json.load(config_file)
+    return data
 
+@allure.step('Configuring browser')
+@pytest.fixture(scope='session')
+def config_browser(config):
+    # Validate and return the browser choice from the config data
+    # To extend the browser support in future
+    if 'browser' not in config:
+        raise Exception('The config file does not contain "browser"')
+    # elif config['browser'] not in SUPPORTED_BROWSERS:
+    #     raise Exception(f'"{config["browser"]}" is not a supported browser')
+    return config['browser']
 
-def get_webdriver(browser, browser_version, platform, os_version):
-    "Run the test in browser stack browser stack flag is 'Y'"
-    BROWSERSTACK_URL = 'https://shivanikumari1:UF1LLXarX9cquCRCnjnS@hub-cloud.browserstack.com/wd/hub'
-    # USERNAME = shivanikumari1  # We fetch values from a conf file in our framework we use on our clients
-    # PASSWORD = accesskey
-    desired_capabilities = {}
-    if browser.lower() == 'firefox':
-        desired_capabilities = DesiredCapabilities.FIREFOX
-    if browser.lower() == 'chrome':
-        desired_capabilities = DesiredCapabilities.CHROME
-    desired_capabilities['os'] = platform
-    desired_capabilities['os_version'] = os_version
-    desired_capabilities['browser_version'] = browser_version
+@allure.step('Configuring the wait time for browser')
+@pytest.fixture(scope='session')
+def config_wait_time(config):
+    # Validate and return the wait time from the config data
+    return config['wait_time'] if 'wait_time' in config else DEFAULT_WAIT_TIME
 
-    driver = webdriver.Remote(command_executor=BROWSERSTACK_URL,
-                              desired_capabilities=desired_capabilities)
+@pytest.hookimpl(tryfirst=True, hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    outcome = yield
+    rep = outcome.get_result()
+    if rep.when == 'call' or rep.failed:
+        mode = 'a' if os.path.exists('failures') else 'w'
+        try:
+            with open('failures', mode) as f:
+                if 'browser' in item.fixturenames:  # assume this is fixture with webdriver
+                    web_driver = item.funcargs['browser']
+                # else :
+                #     print('Fail to take screen-shot')
+                #     return
+            allure.attach(
+                web_driver.get_screenshot_as_png(),
+                name='screenshot',
+                attachment_type=allure.attachment_type.PNG
+            )
+        except Exception as e:
+            print('Fail to take screen-shot: {}'.format(e))
 
-    yield driver
-    driver.quit()
+@allure.step('Initializing the configured browser')
+@pytest.fixture(scope='session')
+def browser(config_browser, config_wait_time, request):
+    # Initialize WebDriver
+    if config_browser == 'chrome':
+        options = Options()
+        options.add_argument('log-level=3')
+        options.add_argument("--window-size=1920,1080")
+        options.add_argument("--disable-extensions")
+        options.add_argument("--proxy-server='direct://'")
+        options.add_argument("--proxy-bypass-list=*")
+        options.add_argument("--start-maximized")
+        options.add_experimental_option('excludeSwitches', ['enable-logging'])
+        options.add_argument('--headless')
+        options.add_argument('--disable-gpu')
+        options.add_argument('--disable-dev-shm-usage')
+        options.add_argument('--no-sandbox')
+        options.add_argument('--ignore-certificate-errors')
+        options.add_argument('--user-agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.163 Safari/537.36"')
+        # chrome_options.add_argument("--window-size=1920x1080")  # options=options
+        driver = Chrome(Browser_path, options=options)
+        # else:
+        #     raise Exception(f'"{config_browser}" is not a supported browser')
 
+        # Wait implicitly for elements to be ready before attempting interactions
+        driver.implicitly_wait(config_wait_time)
+        driver.maximize_window()
 
-"""ios"""
+        # Return the driver object at the end of setup
+        yield driver
 
-#
-# @pytest.fixture(scope='session')
-# def browser():
-#     BROWSERSTACK_URL = 'https://shivanikumari1:UF1LLXarX9cquCRCnjnS@hub-cloud.browserstack.com/wd/hub'
-#
-#     """mac desktop"""
-#
-#     desired_cap = {
-#         "os": "OS X",
-#         "os_version": "Catalina",
-#         "browser": "Safari",
-#         "browser_version": "13.0",
-#         "browserstack.local": "false",
-#         "browserstack.selenium_version": "3.14.0"
-#     }
-#     """ios device"""
-#     # desired_cap={
-#     #     'browserName': 'android',
-#     #     'device': 'Samsung Galaxy A11',
-#     #     'realMobile': 'true',
-#     #     'os_version': '10.0',
-#     #     'name': "Vopay test"
-#     # }
-#
-#     driver = webdriver.Remote(
-#         command_executor=BROWSERSTACK_URL,
-#         desired_capabilities=desired_cap
-#     )
-#
-#     yield driver
-#     driver.quit()
-
-# """android"""
-# @pytest.fixture(scope='session')
-# def browser():
-#     BROWSERSTACK_URL = 'https://shivanikumari1:UF1LLXarX9cquCRCnjnS@hub-cloud.browserstack.com/wd/hub'
-#
-#     desired_cap = {
-#
-#         'browserName': 'android',
-#         'device': 'Samsung Galaxy A11',
-#         'realMobile': 'true',
-#         'os_version': '10.0',
-#         'name': "Vopay test"
-#
-#     }
-#
-#     driver = webdriver.Remote(
-#         command_executor=BROWSERSTACK_URL,
-#         desired_capabilities=desired_cap
-#     )
-#
-#     yield driver
-#     driver.quit()
-#
-#
+        # For cleanup, quit the driver
+        driver.quit()
